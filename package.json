@@ -1,0 +1,39 @@
+{
+  "name": "zip-agent",
+  "version": "0.1.0",
+  "description": "TypeScript CLI wrapping the OS zip/unzip toolchain plus a LangGraph ReAct agent.",
+  "type": "commonjs",
+  "main": "dist/cli.js",
+  "bin": {
+    "zip-agent": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "postinstall": "test -f dist/cli.js && chmod +x dist/cli.js || true",
+    "link": "npm run build && npm link",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/cli.js",
+    "smoke:cjs": "node -e \"const lc=require('langchain'); const lg=require('@langchain/langgraph'); if(typeof lc.createAgent!=='function')throw 0; if(typeof lg.MemorySaver!=='function')throw 0; console.log('CJS OK');\""
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^1.3.0",
+    "@langchain/core": "^1.1.41",
+    "@langchain/google-genai": "^2.1.0",
+    "@langchain/langgraph": "^1.0.0",
+    "@langchain/openai": "^1.4.0",
+    "commander": "^12.1.0",
+    "dotenv": "^17.0.0",
+    "langchain": "^1.3.0",
+    "zod": "^3.25.32"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
