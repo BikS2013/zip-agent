@@ -7,6 +7,7 @@ import { createGoogleModel } from './google';
 import { createAzureOpenaiModel } from './azure-openai';
 import { createAzureAnthropicModel } from './azure-anthropic';
 import { createAzureDeepseekModel } from './azure-deepseek';
+import { createLocalOpenaiModel } from './local-openai';
 
 export const PROVIDERS: Readonly<Record<ProviderName, ProviderFactory>> = Object.freeze({
   openai: createOpenaiModel,
@@ -15,6 +16,7 @@ export const PROVIDERS: Readonly<Record<ProviderName, ProviderFactory>> = Object
   'azure-openai': createAzureOpenaiModel,
   'azure-anthropic': createAzureAnthropicModel,
   'azure-deepseek': createAzureDeepseekModel,
+  'local-openai': createLocalOpenaiModel,
 });
 
 export function getProvider(name: ProviderName): ProviderFactory {

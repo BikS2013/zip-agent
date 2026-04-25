@@ -63,6 +63,7 @@ src/
     exit-codes.ts                 # error class → exit code map
     redact.ts                     # redactString() for log sinks
     zip-runner.ts                 # spawn() wrapper around /usr/bin/zip & /usr/bin/unzip
+    env-loader.ts                 # buildEffectiveEnv() — layered env precedence builder
   types.ts                        # shared CommandDeps shape
   commands/
     list.ts                       # unzip -l
@@ -87,6 +88,7 @@ src/
       azure-openai.ts
       azure-anthropic.ts
       azure-deepseek.ts
+      local-openai.ts
       registry.ts                 # PROVIDERS map + getProvider
     tools/
       types.ts                    # ToolAdapterFactory + handleToolError
@@ -151,7 +153,7 @@ These are non-negotiable (copy-paste-derived from the source spec, §3):
 2. **Existing command modules become tools.** Adapter calls `commands/<name>.run(deps, …)`; never re-implements zip logic.
 3. **Provider registry is an object map.** Add a provider by adding a row to `PROVIDERS` in `src/agent/providers/registry.ts`.
 4. **No-fallback for required config.** Missing required env var → `ConfigurationError` (exit 3).
-5. **Process env > .env > default (optional only).** `dotenv.config({ override: false })` runs in `commands/agent.ts` before `loadAgentConfig`.
+5. **Layered env precedence (unusual — files beat shell).** `buildEffectiveEnv` in `src/util/env-loader.ts` merges sources in this order (last-write-wins): `process.env` → `~/.tool-agents/zip-agent/config` → `./.env`. When `--env-file` is supplied it replaces both file sources. The merged map is passed to `loadAgentConfig`. See ADR-008.
 6. **Mutation tools opt-in.** Without `--allow-mutations`, `create`/`extract`/`add`/`remove` adapters are **excluded from the catalog entirely**.
 7. **Every log line is redacted** through `redactString()`.
 8. **Per-tool byte budget.** Default 16 KiB, configurable via `ZIP_AGENT_PER_TOOL_BUDGET_BYTES`.
@@ -172,6 +174,7 @@ Each setting is read first from `ZIP_AGENT_<PROVIDER>_<NAME>`; if unset, the loa
 | `azure-openai` | `AzureChatOpenAI` | `..._AZURE_OPENAI_API_KEY` → `AZURE_OPENAI_API_KEY`; `..._ENDPOINT` → `AZURE_OPENAI_ENDPOINT`; `..._DEPLOYMENT` → `AZURE_OPENAI_DEPLOYMENT` / `AZURE_OPENAI_DEPLOYMENT_NAME` | Opt: `AZURE_OPENAI_API_VERSION` / `OPENAI_API_VERSION` |
 | `azure-anthropic` | `ChatAnthropic` (Foundry baseURL) | `..._AZURE_AI_INFERENCE_KEY` → `AZURE_AI_INFERENCE_KEY` / `AZURE_INFERENCE_CREDENTIAL`; `..._ENDPOINT` → `AZURE_AI_INFERENCE_ENDPOINT` / `AZURE_INFERENCE_ENDPOINT`; `..._AZURE_ANTHROPIC_MODEL` (no alias) | Foundry `/anthropic` suffix |
 | `azure-deepseek` | `ChatOpenAI` (Foundry baseURL) | shared `AZURE_AI_INFERENCE_*` aliases as above; `..._AZURE_DEEPSEEK_MODEL` (no alias) | Foundry `/openai/v1` suffix; denylist enforced |
+| `local-openai` | `ChatOpenAI` (custom baseURL) | `ZIP_AGENT_LOCAL_OPENAI_BASE_URL` → `LOCAL_OPENAI_BASE_URL` / `OLLAMA_HOST` | Opt: `ZIP_AGENT_LOCAL_OPENAI_API_KEY` (default `"local"` — ADR-007). No deployment fallback; model from `ZIP_AGENT_MODEL` / `--model`. |
 
 DeepSeek denylist (regex match → `ConfigurationError`): `deepseek-v3.2-speciale`, `deepseek-r1` (except `r1-0528`, which has its own break), `deepseek-reasoner`, `deepseek-r1-0528`, `mai-ds-r1`. Accepted: `DeepSeek-V3`, `DeepSeek-V3.1`, `DeepSeek-V3.2`.
 
@@ -214,3 +217,61 @@ Acceptance gates per spec §16: `tsc --noEmit` clean, full vitest green, `node d
 - **ADR-004:** `createAgent` from `langchain` v1 (not `createReactAgent` from `@langchain/langgraph/prebuilt`). The prebuilt is the v0 API and deprecated.
 - **ADR-005:** Azure Foundry uses **shared** auth (`AZURE_AI_INFERENCE_{KEY,ENDPOINT}`) with **per-provider** model env vars. Foundry hosts both Anthropic and DeepSeek behind one resource; only the URL suffix differs.
 - **ADR-006:** Provider env vars accept canonical industry names as aliases. The `ZIP_AGENT_<PROVIDER>_*` prefixed name is the project-specific override path; if it isn't set, the loader walks a chain of widely-used canonical names (e.g. `OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT_NAME`, `AZURE_INFERENCE_CREDENTIAL`). This keeps globally-exported keys reusable without duplication, while still allowing per-agent isolation through a dedicated `.env.zip-agent` file passed via `--env-file`. The no-fallback rule still holds: if neither the prefixed name nor any alias is set, missing-required throws `ConfigurationError`. Project-level tunables (PROVIDER, MODEL, MAX_STEPS, etc.) deliberately have **no** aliases — there are no widely-agreed canonical names for them.
+- **ADR-007:** `ZIP_AGENT_LOCAL_OPENAI_API_KEY` defaults to `"local"` when unset. This is the **sole exception** to the project's no-fallback-for-required-config rule. Most local inference servers (OLLaMA, LM Studio, etc.) require a non-empty API key string but do not validate it. Requiring an explicit value would create needless friction for an inherently local, unauthenticated server. The setting is optional by design; all other settings retain the no-fallback rule.
+- **ADR-008:** Env file sources outrank `process.env`. The layered env builder in `src/util/env-loader.ts` spreads `process.env` first, then `~/.tool-agents/zip-agent/config`, then `./.env` (last-write-wins). This means a value set in `.env` overrides a same-named shell export. Rationale: `.env` and the global config represent deliberate, durable per-project intent; a stale shell export from an unrelated project (e.g. `AZURE_OPENAI_DEPLOYMENT=old-model` left in `~/.zshrc`) must not silently shadow it. Users who need shell to win can set the `ZIP_AGENT_*` prefixed form only in the shell and leave the file source unset, or use `--env-file` to take full control.
+- **ADR-009:** Interactive mode uses a raw-mode TUI by default; the legacy plain-readline REPL is kept behind `--legacy-repl` for one release cycle. The TUI lives entirely under `src/agent/tui/` (separate from `src/agent/run.ts`) and re-uses the existing `RunInteractiveArgs` shape so `src/commands/agent.ts:60` can dispatch between the two paths with one conditional. The TUI never modifies the host agent's source tree apart from that single dispatch and the `--legacy-repl` flag in `cli.ts`. Persistence files live under `~/.tool-agents/zip-agent/` alongside the existing `config` file rather than the project cwd, mirroring the existing global-config layout. See plan-004-tui.md.
+
+## 12. Interactive TUI architecture
+
+`src/agent/tui/` — the raw-mode terminal UI bound to `zip-agent agent -i`.
+
+### File map
+
+| File | Purpose |
+|---|---|
+| `index.ts` | Public re-exports for `commands/agent.ts` and the test suite. |
+| `tui.ts` | Entry point: banner, status bar, main loop, ESC-to-abort, `unhandledRejection` recovery. Exports `runInteractiveTui(args)` with the same `RunInteractiveArgs` shape as `run.ts::runInteractive`. |
+| `streaming.ts` | Async-iterable adapter that turns LangGraph's v2 event stream into the three-event TuiEvent contract (`token` / `tool_start` / `tool_end`). Handles AbortController plumbing and tool-call breadcrumb truncation. |
+| `input.ts` | Raw-mode multiline reader. Implements the spec §5.1 escape-framing table by SHAPE (CSI / SS3 / ESC-prefix), and routes printable bytes through a stateful UTF-8 decoder per spec §5.2. Pure helpers (`replaceInput`, `insertNewline`, `handleBackspace`, `feedEscByte`, …) exported for unit testing. |
+| `spinner.ts` | Braille spinner (`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`, 80 ms tick) wrapped in ANSI save/restore. |
+| `ansi.ts` | ANSI constants and cursor helpers used everywhere — no inline escape sequences elsewhere. |
+| `utf8.ts` | Stateful `StringDecoder` wrapper. The non-negotiable fix for the Latin-1 mojibake regression. |
+| `clipboard.ts` | Cross-platform clipboard dispatcher (`pbcopy`/`wl-copy`/`xclip`/`xsel`/`clip.exe`) with `last-response.txt` fallback. Never silent-fails. |
+| `persistence.ts` | All filesystem CRUD: `memory.md`, `last-response.txt`, `tui-config.json`, `threads/<id>.json`. Idempotent bootstrap mirroring `ensureGlobalConfigFile()`. |
+| `slash-commands.ts` | One handler per slash command + the dispatcher. Case-sensitive matching. |
+| `types.ts` | Shared types (`TuiEvent`, `TuiSession`, `SlashContext`, etc.). No runtime. |
+
+### Event flow per turn
+
+```
+user types → input.ts.readInput resolves with text
+          → tui.ts pushes to messages, starts spinner("Thinking...")
+          → ESC listener attached: ESC | Ctrl+C → AbortController.abort()
+          → streaming.ts.streamTuiEvents wraps graph.streamEvents(input, {version:'v2', signal})
+              for await (ev of stream):
+                token       → spinner.stop() · print Agent header once · stdout.write(text)
+                tool_start  → spinner.stop() · print "↳ calling foo(args)"
+                tool_end    → write " ✓ → result" · spinner.start("Processing tool result...")
+          → spinner.stop() · persist transcript to threads/<id>.json
+          → loop
+```
+
+### Persistence layout
+
+```
+~/.tool-agents/zip-agent/
+├─ config                      (existing — global env)
+├─ memory.md                   (TUI: long-term notes; /memory edits this in $EDITOR)
+├─ last-response.txt           (TUI: rolling, single file; /copy fallback)
+├─ tui-config.json             (TUI: defaultMutations, providerOverride, modelOverride)
+└─ threads/
+   └─ <thread_id>.json         (TUI: per-thread transcript; /history lists & resumes these)
+```
+
+Override env vars: `ZIP_AGENT_TUI_HOME` (root override, used in tests),
+`ZIP_AGENT_TUI_NO_PERSIST=1` (skip every TUI write — for piped contexts and CI).
+
+### Wiring
+
+`src/commands/agent.ts:60` — single conditional: `if (cfg.interactive) { opts.legacyRepl ? runInteractive(...) : runInteractiveTui(...) }`.
+`src/cli.ts` — adds the `--legacy-repl` flag; everything else in the agent subcommand is unchanged.

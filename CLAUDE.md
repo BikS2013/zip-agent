@@ -27,8 +27,7 @@
 - The "Issues - Pending Items.md" content must be organized with the pending items on top and the completed items after. From the pending items the most critical and important must be first followed by the rest.
 
 - When I ask you to create tools in the context of a project everything must be in Typescript.
-- Every tool you develop must be documented in the project's Claude.md file
-- The documentation must be in the following format:
+- Every tool you develop must have its own dedicated documentation file, named after the tool, placed under the `docs/tools/` folder of the project (create the folder if it does not exist). The file must be named `<tool-name>.md` and must contain the complete tool documentation in the following format:
 <toolName>
     <objective>
         what the tool does
@@ -43,10 +42,42 @@
     </info>
 </toolName>
 
-- Every time I ask you to do something that requires the creation of a code script, I want you to examine the tools already implemented in the scope of the project to detect if the code you plan to write, fits to the scope of the tool.
+- The project's CLAUDE.md file must NOT contain the full tool documentation. Instead, it must contain a "Tools" section with a concise reference entry for each tool that includes:
+  - The tool's name
+  - A high-level description of what the tool is capable of (one or two sentences)
+  - The relative path to the tool's dedicated documentation file (e.g. `docs/tools/<tool-name>.md`) so that Claude can retrieve the full documentation any time it is needed.
+
+- Every time I ask you to do something that requires the creation of a code script, I want you to examine the tools already implemented in the scope of the project (by consulting the "Tools" section of the project's CLAUDE.md and the corresponding documentation files under `docs/tools/`) to detect if the code you plan to write fits to the scope of an existing tool.
 - If so, I want you to implement the code as an extension of the tool, otherwise I want you to build a generic and abstract version of the code as a tool, which will be part of the toolset of the project.
 - Our goal is, while the project progressing, to develop the tools needed to test, evaluate, generate data, collect information, etc and reuse them in a consistent manner.
-- All these tools must be documented inside the CLAUDE.md to allow their consistent reuse.
+- All these tools must be referenced inside the project's CLAUDE.md (with their dedicated documentation files under `docs/tools/`) to allow their consistent reuse.
+
+- Every tool must follow the standard environment-variable resolution chain. Configuration values are read from the following sources, ordered from lowest to highest priority — each higher source overrides the lower one when the same variable is defined in both:
+  1. **Shell-registered environment variables** — what the user has exported in the current shell (`process.env`). This is the baseline.
+  2. **`~/.tool-agents/[tool-name]/.env`** — the per-user, per-tool durable defaults file. Values here override the shell variables.
+  3. **Local `.env`** — the `.env` file in the current working directory (project-local override). Values here override the `~/.tool-agents/[tool-name]/.env` values.
+  4. **Command-line parameters** — flags passed by the user when invoking the tool. These override every env-variable source above and always win.
+- On startup the tool must check whether the `~/.tool-agents/[tool-name]/` folder exists; if it does not, the tool must create it (with mode `0700`, and seed an empty or placeholder `.env` inside with mode `0600`) before resolving any configuration. Never assume the folder is already present.
+
+- For variables related to LLM provider configuration (`API_KEY`, `BASE_URL`, `ENDPOINT`, `DEPLOYMENT`, `API_VERSION`, etc.), the tool must adopt the provider's documented, vendor-canonical names — **never prefix them with the tool name**. This lets a single shell-exported variable (e.g. `OPENAI_API_KEY`) be reused by every tool that talks to that provider, instead of forcing the user to re-declare the same value per tool. Canonical names to honor:
+  - **OpenAI** — `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_ORG_ID`
+  - **Anthropic** — `ANTHROPIC_API_KEY`, `ANTHROPIC_BASE_URL`
+  - **Gemini** — `GOOGLE_API_KEY` (accept `GEMINI_API_KEY` as an alias)
+  - **Azure OpenAI** — `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`, `AZURE_OPENAI_API_VERSION`
+  - **Azure Anthropic** (via Foundry) — `AZURE_AI_INFERENCE_KEY`, `AZURE_AI_INFERENCE_ENDPOINT`
+  - **Ollama** — `OLLAMA_HOST`
+  - **LiteLLM proxy** — `LITELLM_PROXY_URL`, `LITELLM_MASTER_KEY`
+  - **MLX-LM server** — reuse `OPENAI_BASE_URL` (MLX-LM is OpenAI-wire-compatible and has no dedicated env convention)
+
+- The standard set of LLM providers every tool must support out of the box (extra providers may be added; **none of these may be omitted**):
+  1. **Direct OpenAI** — `api.openai.com`.
+  2. **Direct Anthropic** — `api.anthropic.com`.
+  3. **Gemini** — Google Generative AI direct API.
+  4. **Azure OpenAI** — Azure-hosted OpenAI deployments.
+  5. **Azure Anthropic** — Azure AI Foundry-hosted Anthropic models.
+  6. **Local Ollama** — local Ollama server (default `http://localhost:11434`).
+  7. **Local LiteLLM** — local LiteLLM proxy (OpenAI-wire-compatible).
+  8. **Local MLX** — local MLX-LM server on Apple Silicon (OpenAI-wire-compatible).
 
 - When I ask you to locate code, I need to give me the folder, the file name, the class, and the line number together with the code extract.
 - Don't perform any version control operation unless I explicitly request it.
@@ -62,120 +93,13 @@
 
 ## Tools
 
-<zip-agent-list>
-    <objective>List the entries inside a zip archive (name, size, modified time).</objective>
-    <command>zip-agent list &lt;archive&gt; [--just-count]</command>
-    <info>
-        Wraps `unzip -l`. Prints {archive, entryCount, totalUncompressedSize, entries[]}. With `--just-count` the entries array is omitted.
-        Exit codes: 0 OK · 2 usage · 5 upstream (unzip non-zero) · 6 io (archive unreadable).
-        Examples:
-            zip-agent list release.zip
-            zip-agent list release.zip --just-count
-            zip-agent list /path/to/file.zip --table
-    </info>
-</zip-agent-list>
-
-<zip-agent-info>
-    <objective>Detailed metadata about a zip archive (`zipinfo -v`).</objective>
-    <command>zip-agent info &lt;archive&gt; [--no-verbose-info]</command>
-    <info>
-        Returns {archive, raw, header, entryCount}. `--no-verbose-info` uses the short zipinfo table instead of -v.
-        Heavier than `list`; use only when entry-level detail (CRC, compression method, attributes) is needed.
-        Examples:
-            zip-agent info release.zip
-            zip-agent info release.zip --no-verbose-info
-    </info>
-</zip-agent-info>
-
-<zip-agent-test>
-    <objective>Verify the integrity of a zip archive (`unzip -t`).</objective>
-    <command>zip-agent test &lt;archive&gt;</command>
-    <info>
-        Returns {archive, ok, errors[], raw}. ok=true requires zero detected errors AND a clean exit code from `unzip -t`.
-        Examples:
-            zip-agent test downloaded.zip
-    </info>
-</zip-agent-test>
-
-<zip-agent-find>
-    <objective>Search a directory tree for files / dirs / sockets / pipes / etc. Read-only. Used by the agent to locate special files that block `zip` (sockets, FIFOs) and feed them to `--exclude`.</objective>
-    <command>zip-agent find &lt;path&gt; [-t &lt;type...&gt;] [-n &lt;glob&gt;] [--max-depth &lt;n&gt;] [--max-results &lt;n&gt;] [--include-hidden] [--exclude-dirs &lt;name...&gt;]</command>
-    <info>
-        Node-native (no shell-out to BSD/GNU find). Returns {searchPath, matchCount, truncated, matches:[{path,type}]}.
-        Type values: file, dir, symlink, socket, pipe, block, char, unknown.
-        Defaults: maxDepth=20, maxResults=500, hidden dot-directories skipped, all types matched.
-        `--name` is a tiny glob (only `*` and `?` wildcards). For more, run multiple finds and combine.
-        Examples:
-            zip-agent find ~/ai-coding --type socket pipe
-            zip-agent find ./reports --type file --name "*.log" --max-results 50
-            zip-agent find / --type socket --max-depth 4 --exclude-dirs node_modules .git
-    </info>
-</zip-agent-find>
-
-<zip-agent-create>
-    <objective>Create a new zip archive from one or more inputs (`zip -r`).</objective>
-    <command>zip-agent create &lt;archive&gt; [inputs...] [-r] [-x &lt;pattern...&gt;] [--password &lt;p&gt;] [--force | --idempotent]</command>
-    <info>
-        `-r/--recurse` (default true) recurses directories. `-x` excludes glob patterns. `--password` enables ZIP encryption (visible in process listings).
-        Refuses to overwrite an existing archive unless `--force` or `--idempotent` is set; otherwise raises CollisionError (exit 7).
-        Examples:
-            zip-agent create out.zip ./src ./README.md
-            zip-agent create out.zip ./reports -x "*.DS_Store" "*.tmp" --idempotent
-            zip-agent create secrets.zip ./vault --password 'hunter2'
-    </info>
-</zip-agent-create>
-
-<zip-agent-extract>
-    <objective>Extract a zip archive into a destination directory (`unzip`).</objective>
-    <command>zip-agent extract &lt;archive&gt; [-d &lt;dir&gt;] [--include &lt;pattern...&gt;] [--password &lt;p&gt;] [--force | --no-clobber]</command>
-    <info>
-        `-d` selects the destination (default cwd). `--include` restricts which entries to extract.
-        Returns {archive, dest, filesExtracted}. Refuses to overwrite by default; raises CollisionError when `unzip` would prompt.
-        Examples:
-            zip-agent extract release.zip -d ./out
-            zip-agent extract release.zip -d ./out --include "docs/*"
-            zip-agent extract secrets.zip --password 'hunter2'
-    </info>
-</zip-agent-extract>
-
-<zip-agent-add>
-    <objective>Add or update entries in an existing archive (`zip -u`).</objective>
-    <command>zip-agent add &lt;archive&gt; [files...] [-r] [--password &lt;p&gt;]</command>
-    <info>
-        Returns {archive, added, updated}. `zip -u` only writes entries newer than what's already in the archive (use `add` for true updates; use `create` to rebuild).
-        Examples:
-            zip-agent add release.zip CHANGELOG.md
-            zip-agent add release.zip ./extras -r
-    </info>
-</zip-agent-add>
-
-<zip-agent-remove>
-    <objective>Delete entries from a zip archive (`zip -d`).</objective>
-    <command>zip-agent remove &lt;archive&gt; [patterns...]</command>
-    <info>
-        Returns {archive, removed}. Patterns are passed verbatim to `zip -d`; quoting at the shell level is your responsibility.
-        Examples:
-            zip-agent remove release.zip "secrets/*"
-            zip-agent remove release.zip "*.tmp" "node_modules/*"
-    </info>
-</zip-agent-remove>
-
-<zip-agent-agent>
-    <objective>Run a LangGraph ReAct agent that wraps the seven zip operations as LLM-callable tools, supporting six providers.</objective>
-    <command>zip-agent agent [prompt] [-i] [-p &lt;name&gt;] [-m &lt;id&gt;] [--max-steps &lt;n&gt;] [--temperature &lt;t&gt;] [--system &lt;text&gt; | --system-file &lt;path&gt;] [--tools &lt;csv&gt;] [--per-tool-budget &lt;bytes&gt;] [--allow-mutations] [--env-file &lt;path&gt;] [--verbose]</command>
-    <info>
-        Two modes: one-shot (positional prompt, JSON envelope on stdout) or interactive REPL (`-i`).
-        Providers (set via -p or ZIP_AGENT_PROVIDER): openai, anthropic, google, azure-openai, azure-anthropic, azure-deepseek.
-        Mutating tools (create/extract/add/remove) are excluded from the catalog unless `--allow-mutations`.
-        Per-tool result is truncated to `--per-tool-budget` (default 16384 bytes) before reaching the model; truncation produces a valid JSON `{"__truncated": true, ...}` wrapper.
-        Configuration precedence: CLI flag > process env > .env > default. Required values have NO fallback (exit 3 ConfigurationError on missing).
-        Exit codes mirror the rest of the CLI: 2 usage · 3 config · 4 auth · 5 upstream · 6 io · 7 collision · 130 SIGINT.
-        Examples:
-            zip-agent agent "what's the largest entry in release.zip?"
-            zip-agent agent -p anthropic -m claude-3-5-sonnet "is downloaded.zip corrupted?"
-            zip-agent agent -i --allow-mutations
-            zip-agent agent --tools list_archive,test_archive "give me a one-paragraph summary of release.zip"
-            zip-agent agent --env-file ./.env.prod "list everything bigger than 1 MB in release.zip"
-    </info>
-</zip-agent-agent>
-
+- **zip-agent-list** — Lists entries inside a zip archive (name, size, modified time) via `unzip -l`. Full docs: [docs/tools/zip-agent-list.md](docs/tools/zip-agent-list.md).
+- **zip-agent-info** — Returns detailed metadata about a zip archive via `zipinfo -v` (CRC, compression method, attributes). Full docs: [docs/tools/zip-agent-info.md](docs/tools/zip-agent-info.md).
+- **zip-agent-test** — Verifies the integrity of a zip archive via `unzip -t`. Full docs: [docs/tools/zip-agent-test.md](docs/tools/zip-agent-test.md).
+- **zip-agent-find** — Node-native directory-tree search for files, dirs, sockets, pipes, etc. Used by the agent to locate special files that block `zip`. Full docs: [docs/tools/zip-agent-find.md](docs/tools/zip-agent-find.md).
+- **zip-agent-create** — Creates a new zip archive from one or more inputs via `zip -r`, with exclude patterns, password encryption, and overwrite guards. Full docs: [docs/tools/zip-agent-create.md](docs/tools/zip-agent-create.md).
+- **zip-agent-extract** — Extracts a zip archive into a destination directory via `unzip`, with include filters and clobber guards. Full docs: [docs/tools/zip-agent-extract.md](docs/tools/zip-agent-extract.md).
+- **zip-agent-add** — Adds or updates entries in an existing archive via `zip -u`. Full docs: [docs/tools/zip-agent-add.md](docs/tools/zip-agent-add.md).
+- **zip-agent-remove** — Deletes entries from a zip archive via `zip -d`. Full docs: [docs/tools/zip-agent-remove.md](docs/tools/zip-agent-remove.md).
+- **zip-agent-agent** — LangGraph ReAct agent that wraps the seven zip operations as LLM-callable tools across seven providers (OpenAI, Anthropic, Google, Azure OpenAI/Anthropic/DeepSeek, local-openai). Supports one-shot and interactive modes, tool filtering, mutation gating, and tiered env-file precedence. Full docs: [docs/tools/zip-agent-agent.md](docs/tools/zip-agent-agent.md).
+- **zip-agent-tui** — Raw-mode terminal UI for `zip-agent agent -i` with token streaming, multiline editing, slash commands (/help /history /memory /new /quit /last /copy /model /tools /system /clear), and per-thread persistence under `~/.tool-agents/zip-agent/`. Full docs: [docs/tools/zip-agent-tui.md](docs/tools/zip-agent-tui.md).

@@ -1,4 +1,13 @@
-# =============================================================================
+/**
+ * global-config-template.ts — embedded copy of .env.example used to seed
+ * `~/.tool-agents/zip-agent/config` on first agent invocation.
+ *
+ * IMPORTANT: this constant must remain byte-for-byte identical to the
+ * project root `.env.example`. A vitest drift test
+ * (test_scripts/agent-env-loader.spec.ts) asserts equality so any update to
+ * one file fails CI until the other is brought back in sync.
+ */
+export const GLOBAL_CONFIG_TEMPLATE = `# =============================================================================
 # zip-agent — environment variables (template)
 # Copy to .env and fill in. .env is gitignored; only .env.example is checked in.
 #
@@ -115,3 +124,4 @@
 #     vLLM:      http://localhost:8000/v1
 # ZIP_AGENT_LOCAL_OPENAI_BASE_URL=http://localhost:11434/v1
 # ZIP_AGENT_LOCAL_OPENAI_API_KEY=local
+`;

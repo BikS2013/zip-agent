@@ -6,7 +6,8 @@ export type ProviderName =
   | 'google'
   | 'azure-openai'
   | 'azure-anthropic'
-  | 'azure-deepseek';
+  | 'azure-deepseek'
+  | 'local-openai';
 
 const PROVIDER_NAMES: readonly ProviderName[] = [
   'openai',
@@ -15,6 +16,7 @@ const PROVIDER_NAMES: readonly ProviderName[] = [
   'azure-openai',
   'azure-anthropic',
   'azure-deepseek',
+  'local-openai',
 ];
 
 export interface AgentConfigFlags {
@@ -58,6 +60,8 @@ const PROVIDER_MODEL_FALLBACK_ENV: Partial<Record<ProviderName, string>> = {
   'azure-openai': 'ZIP_AGENT_AZURE_OPENAI_DEPLOYMENT',
   'azure-anthropic': 'ZIP_AGENT_AZURE_ANTHROPIC_MODEL',
   'azure-deepseek': 'ZIP_AGENT_AZURE_DEEPSEEK_MODEL',
+  // local-openai: no provider-specific deployment env; model must be set via
+  // --model / ZIP_AGENT_MODEL directly.
 };
 
 /**
@@ -72,6 +76,7 @@ const PROVIDER_ENV_PREFIXES: Record<ProviderName, readonly string[]> = {
   'azure-openai': ['ZIP_AGENT_AZURE_OPENAI_'],
   'azure-anthropic': ['ZIP_AGENT_AZURE_ANTHROPIC_', 'ZIP_AGENT_AZURE_AI_INFERENCE_'],
   'azure-deepseek': ['ZIP_AGENT_AZURE_DEEPSEEK_', 'ZIP_AGENT_AZURE_AI_INFERENCE_'],
+  'local-openai': ['ZIP_AGENT_LOCAL_OPENAI_'],
 };
 
 /**
@@ -114,6 +119,13 @@ const PROVIDER_ENV_ALIASES: Readonly<Record<string, readonly string[]>> = Object
     'AZURE_AI_INFERENCE_ENDPOINT',
     'AZURE_INFERENCE_ENDPOINT',
   ],
+
+  // local-openai: BASE_URL is required; API_KEY is optional (many local
+  // servers ignore it but the SDK requires a non-empty string).
+  // No canonical alias for BASE_URL — it is inherently project-local.
+  // OPENAI_API_KEY is a last-resort alias for API_KEY only.
+  ZIP_AGENT_LOCAL_OPENAI_BASE_URL: ['LOCAL_OPENAI_BASE_URL', 'OLLAMA_HOST'],
+  ZIP_AGENT_LOCAL_OPENAI_API_KEY: ['OPENAI_API_KEY'],
 });
 
 export function loadAgentConfig(
@@ -126,7 +138,11 @@ export function loadAgentConfig(
 
   const providerRaw = flags.provider ?? env['ZIP_AGENT_PROVIDER'];
   if (!providerRaw) {
-    throw new ConfigurationError('ZIP_AGENT_PROVIDER', ['--provider', 'ZIP_AGENT_PROVIDER']);
+    throw new ConfigurationError(
+      'ZIP_AGENT_PROVIDER',
+      ['--provider', 'ZIP_AGENT_PROVIDER'],
+      `Example: --provider azure-openai or ZIP_AGENT_PROVIDER=azure-openai. Known providers: ${PROVIDER_NAMES.join(', ')}.`,
+    );
   }
   const provider = providerRaw as ProviderName;
   if (!PROVIDER_NAMES.includes(provider)) {

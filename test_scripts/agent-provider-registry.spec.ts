@@ -25,13 +25,14 @@ function makeCfg(provider: ProviderName, env: Record<string, string>, model = 'm
 }
 
 describe('PROVIDERS map', () => {
-  it('exposes exactly 6 providers', () => {
+  it('exposes exactly 7 providers', () => {
     expect(Object.keys(PROVIDERS).sort()).toEqual([
       'anthropic',
       'azure-anthropic',
       'azure-deepseek',
       'azure-openai',
       'google',
+      'local-openai',
       'openai',
     ]);
   });
@@ -151,6 +152,54 @@ describe('azure-deepseek factory (Foundry)', () => {
     expect(() =>
       getProvider('azure-deepseek')(
         makeCfg('azure-deepseek', { ...baseEnv, ZIP_AGENT_AZURE_DEEPSEEK_MODEL: model }, model),
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe('local-openai factory', () => {
+  it('builds a ChatOpenAI instance with a valid baseURL', () => {
+    const m = getProvider('local-openai')(
+      makeCfg('local-openai', {
+        ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1',
+      }, 'llama3'),
+    );
+    expect(m).toBeInstanceOf(ChatOpenAI);
+  });
+
+  it('throws ConfigurationError when ZIP_AGENT_LOCAL_OPENAI_BASE_URL is missing', () => {
+    expect(() =>
+      getProvider('local-openai')(makeCfg('local-openai', {}, 'llama3')),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('throws ConfigurationError when ZIP_AGENT_LOCAL_OPENAI_BASE_URL is not a valid URL', () => {
+    expect(() =>
+      getProvider('local-openai')(
+        makeCfg('local-openai', { ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'not-a-url' }, 'llama3'),
+      ),
+    ).toThrow(ConfigurationError);
+  });
+
+  it('uses a custom API key when ZIP_AGENT_LOCAL_OPENAI_API_KEY is set', () => {
+    // Just confirm it constructs without error (the key is passed to ChatOpenAI)
+    expect(() =>
+      getProvider('local-openai')(
+        makeCfg('local-openai', {
+          ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1',
+          ZIP_AGENT_LOCAL_OPENAI_API_KEY: 'my-local-key',
+        }, 'llama3'),
+      ),
+    ).not.toThrow();
+  });
+
+  it('uses the default "local" API key when ZIP_AGENT_LOCAL_OPENAI_API_KEY is absent', () => {
+    // Confirm it constructs without error even without an explicit key
+    expect(() =>
+      getProvider('local-openai')(
+        makeCfg('local-openai', {
+          ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1',
+        }, 'llama3'),
       ),
     ).not.toThrow();
   });

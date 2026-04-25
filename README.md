@@ -7,7 +7,7 @@ those operations in natural language.
 ```
 $ zip-agent agent "list everything in release.zip larger than 1 MB"
 $ zip-agent agent "zip ./reports into reports.zip but skip *.DS_Store" --allow-mutations
-$ zip-agent agent -i      # interactive REPL with in-process memory
+$ zip-agent agent -i      # raw-mode TUI: streaming, multiline, slash commands
 ```
 
 ---
@@ -55,28 +55,39 @@ The agent reuses canonical industry env-var names (`OPENAI_API_KEY`,
 are project-specific and have to be set explicitly.
 
 ```sh
-# OpenAI — uses your already-exported OPENAI_API_KEY
-export ZIP_AGENT_PROVIDER=openai
-export ZIP_AGENT_MODEL=gpt-4o-mini
+# Azure OpenAI — one-shot, canonical env-var names
+export ZIP_AGENT_PROVIDER=azure-openai
+export ZIP_AGENT_MODEL=gpt-4o-mini        # or set AZURE_OPENAI_DEPLOYMENT
+export AZURE_OPENAI_API_KEY=<your-key>
+export AZURE_OPENAI_ENDPOINT=https://<your-resource>.openai.azure.com
 zip-agent agent "what's the largest entry in release.zip?"
 
-# Azure OpenAI — interactive REPL, picks up AZURE_OPENAI_*
+# Azure OpenAI — interactive REPL with in-process memory
 export ZIP_AGENT_PROVIDER=azure-openai
 export ZIP_AGENT_MODEL=gpt-4o-mini
 zip-agent agent -i
 
-# Azure DeepSeek via Microsoft Foundry — picks up AZURE_AI_INFERENCE_*
-export ZIP_AGENT_PROVIDER=azure-deepseek
-export ZIP_AGENT_AZURE_DEEPSEEK_MODEL=DeepSeek-V3.1
-zip-agent agent "is release.zip corrupted?"
+# OLLaMA (local-openai) — no API key needed, model pulled from OLLaMA
+export ZIP_AGENT_PROVIDER=local-openai
+export ZIP_AGENT_MODEL=llama3
+export ZIP_AGENT_LOCAL_OPENAI_BASE_URL=http://localhost:11434/v1
+zip-agent agent "is downloaded.zip corrupted?"
 ```
 
 ### Env-var precedence
 
-For each provider setting (API key / endpoint / deployment / api-version):
+The agent uses a layered resolution with an unusual ordering: dotenv **files
+win over shell exports** so that a deliberately-set project value is never
+silently overridden by a stale shell export from another project.
 
 ```
-CLI flag  >  ZIP_AGENT_<PROVIDER>_<NAME>  >  canonical alias  >  default (optional only)
+1. --env-file <path>       Replaces both file sources below.
+2. CLI flag                --provider, --model, etc.
+3. ./.env                  Project-local dotenv (wins over global config & shell).
+4. ~/.tool-agents/zip-agent/config   Global per-tool config (wins over shell).
+5. process.env             Existing shell exports (lowest before defaults).
+6. NONE                    Required → ConfigurationError (exit 3).
+                           Optional tunables → built-in default.
 ```
 
 Examples:
@@ -107,6 +118,55 @@ calling them.
 
 See `docs/design/configuration-guide.md` for the full env-variable matrix and
 `docs/design/project-design.md` for the architecture and ADRs.
+
+## Interactive TUI
+
+`zip-agent agent -i` launches a single-process raw-mode terminal UI. It
+streams the model's response token by token, shows tool-call breadcrumbs
+inline (`↳ calling list_archive(...) ✓`), and accepts ESC to abort an
+in-flight turn. Multiline editing, UTF-8 input (Greek, CJK, emoji), and
+input history all work — no `readline`.
+
+Quick-start:
+
+```sh
+npm install
+npm run build
+ZIP_AGENT_PROVIDER=openai ZIP_AGENT_MODEL=gpt-4o-mini OPENAI_API_KEY=... \
+  node dist/cli.js agent -i
+```
+
+Slash commands (case-sensitive):
+
+| | |
+|---|---|
+| `/help` | List every command and keybinding |
+| `/history` | Pick a past thread to resume |
+| `/memory` | Edit `~/.tool-agents/zip-agent/memory.md` in `$EDITOR` |
+| `/new` (alias `/reset`) | Fresh thread (memory.md kept) |
+| `/quit` (alias `/exit`) | Leave the TUI |
+| `/last` | Re-print the last assistant message |
+| `/copy` | Copy the last response to the system clipboard |
+| `/model` | Pick a provider + model id at runtime |
+| `/tools` | Toggle individual tools / `--allow-mutations` master |
+| `/system` | View / `e` to edit the system prompt (in-memory only) |
+| `/clear` | Clear the screen, keep the conversation |
+
+Keybindings: `Enter` submits, `Ctrl+J` inserts a newline (universal),
+`Shift+Enter` inserts a newline on terminals that opt into CSI-u (kitty,
+Ghostty, recent iTerm2/Alacritty). On older terminals `Shift+Enter` falls
+through to a plain submit; use `Ctrl+J`. Arrow keys move the cursor and
+navigate input history at top/bottom edges; `Ctrl+A`/`Ctrl+E`/`Ctrl+W`
+work as expected; `Ctrl+L` clears the screen.
+
+Persistence files live under `~/.tool-agents/zip-agent/` (`memory.md`,
+`last-response.txt`, `tui-config.json`, `threads/<id>.json`) and are
+auto-bootstrapped on first run. Override the root with
+`ZIP_AGENT_TUI_HOME=...` or skip writes entirely with
+`ZIP_AGENT_TUI_NO_PERSIST=1`.
+
+Need to pipe input or escape to the previous behaviour? Use
+`zip-agent agent -i --legacy-repl` for one release cycle.
 
 ## Development
 

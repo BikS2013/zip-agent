@@ -162,4 +162,69 @@ describe('loadAgentConfig', () => {
     expect(cfg.providerEnv['ZIP_AGENT_AZURE_AI_INFERENCE_KEY']).toBe('k');
     expect(cfg.providerEnv['ZIP_AGENT_AZURE_AI_INFERENCE_ENDPOINT']).toBe('https://foundry');
   });
+
+  // ---- local-openai provider ----------------------------------------
+
+  it('accepts local-openai as a valid provider', () => {
+    const cfg = loadAgentConfig(
+      { provider: 'local-openai', model: 'llama3' },
+      { ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1' },
+    );
+    expect(cfg.provider).toBe('local-openai');
+    expect(cfg.model).toBe('llama3');
+  });
+
+  it('snapshots local-openai env vars under ZIP_AGENT_LOCAL_OPENAI_ prefix', () => {
+    const cfg = loadAgentConfig(
+      { provider: 'local-openai', model: 'llama3' },
+      {
+        ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1',
+        ZIP_AGENT_LOCAL_OPENAI_API_KEY: 'my-key',
+        ZIP_AGENT_OPENAI_API_KEY: 'should-not-appear',
+      },
+    );
+    expect(cfg.providerEnv['ZIP_AGENT_LOCAL_OPENAI_BASE_URL']).toBe('http://localhost:11434/v1');
+    expect(cfg.providerEnv['ZIP_AGENT_LOCAL_OPENAI_API_KEY']).toBe('my-key');
+    // openai keys must NOT leak into local-openai snapshot
+    expect(cfg.providerEnv['ZIP_AGENT_OPENAI_API_KEY']).toBeUndefined();
+  });
+
+  it('falls back to LOCAL_OPENAI_BASE_URL alias for local-openai', () => {
+    const cfg = loadAgentConfig(
+      { provider: 'local-openai', model: 'llama3' },
+      { LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1' },
+    );
+    expect(cfg.providerEnv['ZIP_AGENT_LOCAL_OPENAI_BASE_URL']).toBe('http://localhost:11434/v1');
+  });
+
+  it('falls back to OLLAMA_HOST alias for local-openai BASE_URL', () => {
+    const cfg = loadAgentConfig(
+      { provider: 'local-openai', model: 'llama3' },
+      { OLLAMA_HOST: 'http://localhost:11434/v1' },
+    );
+    expect(cfg.providerEnv['ZIP_AGENT_LOCAL_OPENAI_BASE_URL']).toBe('http://localhost:11434/v1');
+  });
+
+  it('falls back to OPENAI_API_KEY as last-resort alias for local-openai API key', () => {
+    const cfg = loadAgentConfig(
+      { provider: 'local-openai', model: 'llama3' },
+      {
+        ZIP_AGENT_LOCAL_OPENAI_BASE_URL: 'http://localhost:11434/v1',
+        OPENAI_API_KEY: 'sk-canonical',
+      },
+    );
+    expect(cfg.providerEnv['ZIP_AGENT_LOCAL_OPENAI_API_KEY']).toBe('sk-canonical');
+  });
+
+  // ---- provider error includes azure-openai example -----------------
+
+  it('ConfigurationError for missing provider includes azure-openai example hint', () => {
+    try {
+      loadAgentConfig({}, {});
+      expect.fail('should have thrown');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ConfigurationError);
+      expect((e as ConfigurationError).message).toContain('azure-openai');
+    }
+  });
 });

@@ -206,7 +206,8 @@ program
 program
   .command('agent [prompt]')
   .description('Run the LangGraph ReAct agent over zip-agent.')
-  .option('-i, --interactive', 'Start a REPL', false)
+  .option('-i, --interactive', 'Start the raw-mode TUI (or legacy REPL with --legacy-repl)', false)
+  .option('--legacy-repl', 'Fall back to the plain-readline REPL instead of the raw-mode TUI', false)
   .option('-p, --provider <name>', 'LLM provider')
   .option('-m, --model <id>', 'Model id / deployment name')
   .option('--max-steps <n>', 'ReAct iteration cap', (v) => parseInt(v, 10))
@@ -222,6 +223,7 @@ program
     makeAction<
       {
         interactive?: boolean;
+        legacyRepl?: boolean;
         provider?: string;
         model?: string;
         maxSteps?: number;
@@ -238,6 +240,7 @@ program
     >(program, async (deps, g, opts, prompt) => {
       const agentOpts: AgentOptions = {
         interactive: opts.interactive ?? false,
+        legacyRepl: opts.legacyRepl ?? false,
         provider: opts.provider,
         model: opts.model,
         maxSteps: opts.maxSteps,

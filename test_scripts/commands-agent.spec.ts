@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// CRITICAL: dotenv mock must precede the agent module import so that real
-// .env files in cwd never leak into these tests.
-vi.mock('dotenv', () => ({
-  default: { config: vi.fn(() => ({ parsed: {} })) },
-  config: vi.fn(() => ({ parsed: {} })),
+// Mock env-loader so real dotenv files in cwd / home never leak into tests.
+// buildEffectiveEnv returns process.env unmodified so the tests that set
+// process.env keys get deterministic behaviour.
+vi.mock('../src/util/env-loader', () => ({
+  buildEffectiveEnv: vi.fn(() => process.env),
+  readDotenvFile: vi.fn(() => ({})),
+  GLOBAL_CONFIG_PATH: '/dev/null',
+  // Stub the bootstrap so tests do not touch the real $HOME.
+  ensureGlobalConfigFile: vi.fn(() => ({ path: '/dev/null', created: false })),
 }));
 
 import * as agentCmd from '../src/commands/agent';
@@ -51,6 +55,8 @@ const ENV_KEYS = [
   'ZIP_AGENT_AZURE_OPENAI_DEPLOYMENT',
   'ZIP_AGENT_AZURE_AI_INFERENCE_KEY',
   'ZIP_AGENT_AZURE_AI_INFERENCE_ENDPOINT',
+  'ZIP_AGENT_LOCAL_OPENAI_BASE_URL',
+  'ZIP_AGENT_LOCAL_OPENAI_API_KEY',
   // Canonical aliases — must also be cleared so the developer's globally
   // exported keys don't leak into "missing API key" assertions.
   'OPENAI_API_KEY',
@@ -72,6 +78,8 @@ const ENV_KEYS = [
   'AZURE_AI_INFERENCE_ENDPOINT',
   'AZURE_INFERENCE_CREDENTIAL',
   'AZURE_INFERENCE_ENDPOINT',
+  'LOCAL_OPENAI_BASE_URL',
+  'OLLAMA_HOST',
 ];
 const saved: Record<string, string | undefined> = {};
 beforeEach(() => {
